@@ -1,0 +1,16 @@
+{
+  "name": "swc-plugin-observing-components",
+  "version": "0.1.0",
+  "description": "",
+  "author": "",
+  "license": "ISC",
+  "keywords": [
+    "swc-plugin"
+  ],
+  "main": "swc_plugin_observing_components.wasm",
+  "scripts": {
+    "prepack": "cargo build --release -p swc_plugin_observing_components --target wasm32-wasip1 && cp ../target/wasm32-wasip1/release/swc_plugin_observing_components.wasm ."
+  },
+  "files": [],
+  "preferUnplugged": true
+}
