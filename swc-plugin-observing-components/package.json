@@ -11,6 +11,8 @@
   "scripts": {
     "prepack": "cargo build --release -p swc_plugin_observing_components --target wasm32-wasip1 && cp ../target/wasm32-wasip1/release/swc_plugin_observing_components.wasm ."
   },
-  "files": [],
+  "files": [
+    "swc_plugin_observing_components.wasm"
+  ],
   "preferUnplugged": true
 }
