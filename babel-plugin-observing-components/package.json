@@ -1,6 +1,6 @@
 {
   "name": "babel-plugin-observing-components",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Wrap components in a observers to make them reactive",
   "author": "Christian Alfoni <christianalfoni@gmail.com>",
   "license": "MIT",
@@ -12,14 +12,14 @@
     ".": {
       "import": "./dist/esm/index.js",
       "types": "./dist/esm/index.d.ts",
-      "default": "./dist/cjs/index.cjs"
+      "require": "./dist/cjs/index.cjs"
     }
   },
   "types": "./dist/esm/index.d.ts",
   "scripts": {
     "dev": "tsc -p ./tsconfig.build-esm.json --watch",
     "build": "yarn clean && yarn build:cjs && yarn build:esm",
-    "build:cjs": "tsc -p ./tsconfig.build-cjs.json",
+    "build:cjs": "tsc -p ./tsconfig.build-cjs.json && node renameToCjs.js",
     "build:esm": "tsc -p ./tsconfig.build-esm.json",
     "transform": "yarn build:cjs && node test-transform",
     "clean": "rimraf ./dist",
