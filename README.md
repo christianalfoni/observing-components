@@ -34,7 +34,7 @@ const babelConfig = {
 **SWC**
 
 ```sh
-npm install babel-plugin-observing-components
+npm install swc-plugin-observing-components
 ```
 
 ```json
