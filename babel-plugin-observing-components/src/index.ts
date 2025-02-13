@@ -180,12 +180,15 @@ function wrapFunctionWithObserver(
   }
 }
 
-export default function createPlugin({
-  importPath,
-  importName = "observer",
-}: {
+export default function createPlugin(options: {
   importPath: string;
   importName?: string;
 }): [typeof transform, Record<string, any>] {
-  return [transform, { importPath, importName }];
+  return [
+    transform,
+    {
+      importPath: options.importPath,
+      importName: options.importName || "observer",
+    },
+  ];
 }
