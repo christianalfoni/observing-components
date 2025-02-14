@@ -13,7 +13,7 @@ fn syntax() -> Syntax {
     })
 }
 
-#[testing::fixture("tests/fixture/input.js")]
+#[testing::fixture("tests/fixture/**/input.js")]
 fn fixture(input: PathBuf) {
     let output = input.parent().unwrap().join("output.js");
     test_fixture(

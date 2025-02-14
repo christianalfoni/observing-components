@@ -84,12 +84,17 @@ fn contains_jsx_in_module(module: &Module) -> bool {
         ModuleItem::Stmt(stmt) => contains_jsx_in_stmt(stmt),
         ModuleItem::ModuleDecl(decl) => match decl {
             ModuleDecl::ExportDefaultExpr(export) => contains_jsx_in_expr(&export.expr),
-            ModuleDecl::ExportDecl(export_decl) => {
-                if let Decl::Fn(fn_decl) = &export_decl.decl {
-                    contains_jsx_in_function(&fn_decl.function)
-                } else {
-                    false
-                }
+            ModuleDecl::ExportDecl(export_decl) => match &export_decl.decl {
+                Decl::Fn(fn_decl) => contains_jsx_in_function(&fn_decl.function),
+                Decl::Var(var_decl) => var_decl.decls.iter().any(|decl| {
+                    if let Some(init) = &decl.init {
+                        // Check arrow functions in variable declarations
+                        contains_jsx_in_expr(init)
+                    } else {
+                        false
+                    }
+                }),
+                _ => false,
             },
             ModuleDecl::ExportDefaultDecl(export_decl) => {
                 if let swc_ecma_ast::DefaultDecl::Fn(f) = &export_decl.decl {
@@ -103,43 +108,128 @@ fn contains_jsx_in_module(module: &Module) -> bool {
     })
 }
 
+// NEW: Helper to check if an expression is already wrapped
+fn is_already_wrapped(expr: &Expr, observer_name: &str) -> bool {
+    if let Expr::Call(call_expr) = expr {
+        if let Callee::Expr(boxed) = &call_expr.callee {
+            if let Expr::Ident(id) = &**boxed {
+                return id.sym.to_string() == observer_name;
+            }
+        }
+    }
+    false
+}
+
+// NEW: Update helper to check for wrapped functions in variable declarations as well.
+fn module_contains_wrapped_function(module: &Module, observer_name: &str) -> bool {
+    module.body.iter().any(|item| match item {
+        // Check top-level expression statements.
+        ModuleItem::Stmt(Stmt::Expr(expr_stmt)) => {
+            if let Expr::Call(call_expr) = &*expr_stmt.expr {
+                if let Callee::Expr(boxed) = &call_expr.callee {
+                    if let Expr::Ident(id) = &**boxed {
+                        return id.sym.to_string() == observer_name;
+                    }
+                }
+            }
+            false
+        },
+        // Check variable declarations.
+        ModuleItem::Stmt(Stmt::Decl(Decl::Var(var_decl))) => {
+            var_decl.decls.iter().any(|decl| {
+                if let Some(init) = &decl.init {
+                    is_already_wrapped(init, observer_name)
+                } else {
+                    false
+                }
+            })
+        },
+        // Check export declarations that include variable declarations.
+        ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export_decl)) => match &export_decl.decl {
+            Decl::Var(var_decl) => {
+                var_decl.decls.iter().any(|decl| {
+                    if let Some(init) = &decl.init {
+                        is_already_wrapped(init, observer_name)
+                    } else {
+                        false
+                    }
+                })
+            },
+            _ => false,
+        },
+        _ => false,
+    })
+}
+
 impl Fold for ObserverTransform {
     noop_fold_type!();
 
     fn fold_module(&mut self, mut module: Module) -> Module {
-        // Use the new helper to check if any function with JSX is present.
+        // ...existing code...
         let should_add_import = contains_jsx_in_module(&module);
-        if should_add_import && !self.has_added_import {
-            // Add import statement with config values.
-            let import_name = self.get_import_name();
-            let import_path = self.config.import_path.clone();
-            let import = ModuleItem::ModuleDecl(ModuleDecl::Import(ImportDecl {
-                span: Default::default(),
-                specifiers: vec![ImportSpecifier::Named(ImportNamedSpecifier {
-                    span: Default::default(),
-                    local: Ident::new(import_name.clone().into(), Default::default(), Default::default()),
-                    imported: None,
-                    is_type_only: false,
-                })],
-                src: Box::new(Str {
-                    span: Default::default(),
-                    value: import_path.into(),
-                    raw: None,
-                }),
-                type_only: false,
-                with: None,
-                phase: ImportPhase::Evaluation,
-            }));
-            
-            module.body.insert(0, import);
+        let observer_name = self.get_import_name();
+
+        // NEW: Do not add an import if an already wrapped function is identified.
+        if module_contains_wrapped_function(&module, &observer_name) {
             self.has_added_import = true;
         }
 
-        // Transform the module items
+        if should_add_import && !self.has_added_import {
+            // ...existing import logic...
+            let mut observer_alias = observer_name.clone(); // default alias
+            let found_alias = module.body.iter().filter_map(|item| {
+                if let ModuleItem::ModuleDecl(ModuleDecl::Import(import_decl)) = item {
+                    for spec in &import_decl.specifiers {
+                        if let ImportSpecifier::Named(named) = spec {
+                            let imported = if let Some(imported) = &named.imported {
+                                match imported {
+                                    ModuleExportName::Ident(ident) => ident.sym.to_string(),
+                                    ModuleExportName::Str(s) => s.value.to_string(),
+                                }
+                            } else {
+                                named.local.sym.to_string()
+                            };
+                            if imported == observer_name {
+                                return Some(named.local.sym.to_string());
+                            }
+                        }
+                    }
+                }
+                None
+            }).next();
+
+            if let Some(alias) = found_alias {
+                observer_alias = alias;
+                self.has_added_import = true;
+            } else {
+                let import_path = self.config.import_path.clone();
+                let import = ModuleItem::ModuleDecl(ModuleDecl::Import(ImportDecl {
+                    span: Default::default(),
+                    specifiers: vec![ImportSpecifier::Named(ImportNamedSpecifier {
+                        span: Default::default(),
+                        local: Ident::new(observer_name.clone().into(), Default::default(), Default::default()),
+                        imported: None,
+                        is_type_only: false,
+                    })],
+                    src: Box::new(Str {
+                        span: Default::default(),
+                        value: import_path.into(),
+                        raw: None,
+                    }),
+                    type_only: false,
+                    with: None,
+                    phase: ImportPhase::Evaluation,
+                }));
+                module.body.insert(0, import);
+                self.has_added_import = true;
+            }
+            // ...existing code...
+        }
+
         let transformed_body = module.body.into_iter().map(|item| {
-            let import_name = self.get_import_name();
+            // ...existing transformation code...
             match item {
-                // NEW: Handle non-exported function declarations containing JSX
+                // ...existing code...
                 ModuleItem::Stmt(Stmt::Decl(Decl::Fn(fn_decl))) => {
                     if contains_jsx_in_function(&fn_decl.function) {
                         let ident = fn_decl.ident.clone();
@@ -150,7 +240,7 @@ impl Fold for ObserverTransform {
                         let wrapped_fn_expr = Expr::Call(CallExpr {
                             span: Default::default(),
                             callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
-                                import_name.clone().into(),
+                                observer_name.clone().into(),
                                 Default::default(),
                                 Default::default(),
                             )))),
@@ -181,13 +271,13 @@ impl Fold for ObserverTransform {
                         ModuleItem::Stmt(Stmt::Decl(Decl::Fn(fn_decl)))
                     }
                 },
-                ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultExpr(export)) 
+                ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultExpr(export))
                     if contains_jsx_in_expr(&export.expr) =>
                 {
                     let wrapped_expr = Expr::Call(CallExpr {
                         span: Default::default(),
                         callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
-                            import_name.clone().into(),
+                            observer_name.clone().into(),
                             Default::default(),
                             Default::default(),
                         )))),
@@ -204,10 +294,8 @@ impl Fold for ObserverTransform {
                         expr: Box::new(wrapped_expr),
                     }))
                 },
-                // NEW: Transform variable declarations (e.g., const Home2 = () => {...}) with arrow functions containing JSX.
                 ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(mut export_decl)) => {
                     match &mut export_decl.decl {
-                        // NEW: Transform function declarations into const variable declarations and wrap with observer
                         Decl::Fn(fn_decl) => {
                             if contains_jsx_in_function(&fn_decl.function) {
                                 let ident = fn_decl.ident.clone();
@@ -215,11 +303,10 @@ impl Fold for ObserverTransform {
                                     ident: Some(ident.clone()),
                                     function: fn_decl.function.clone(),
                                 });
-                                // NEW: Wrap the function expression with observer
                                 let wrapped_fn_expr = Expr::Call(CallExpr {
                                     span: Default::default(),
                                     callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
-                                        import_name.clone().into(),
+                                        observer_name.clone().into(),
                                         Default::default(),
                                         Default::default(),
                                     )))),
@@ -253,95 +340,95 @@ impl Fold for ObserverTransform {
                                 ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export_decl))
                             }
                         },
-                        // EXISTING: Handling of variable declarations and other cases
                         Decl::Var(var_decl) => {
                             // ...existing code for handling var declarations...
                             for decl in var_decl.decls.iter_mut() {
                                 if let Some(init) = &mut decl.init {
-                                    // NEW: Handle wrapping functions inside any call expression (not just "memo")
-                                    if let Expr::Call(call_expr) = &mut **init {
-                                        if let Some(arg) = call_expr.args.get_mut(0) {
-                                            match &mut *arg.expr {
-                                                Expr::Fn(_) | Expr::Arrow(_) => {
+                                    if is_already_wrapped(&*init, &observer_name) {
+                                        continue;
+                                    }
+                                    let mut wrapped_already = false;
+                                    if let Expr::Call(call_expr) = &**init {
+                                        if let Some(arg) = call_expr.args.first() {
+                                            if matches!(&*arg.expr, Expr::Fn(_) | Expr::Arrow(_))
+                                                && contains_jsx_in_expr(&arg.expr)
+                                            {
+                                                let wrapped = Expr::Call(CallExpr {
+                                                    span: Default::default(),
+                                                    callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
+                                                        observer_name.clone().into(),
+                                                        Default::default(),
+                                                        Default::default(),
+                                                    )))),
+                                                    args: vec![ExprOrSpread {
+                                                        spread: None,
+                                                        expr: init.clone(),
+                                                    }],
+                                                    type_args: None,
+                                                    ctxt: Default::default(),
+                                                });
+                                                *init = Box::new(wrapped);
+                                                wrapped_already = true;
+                                            }
+                                        }
+                                    }
+                                    if !wrapped_already {
+                                        match &mut **init {
+                                            Expr::Arrow(_) => {
+                                                if contains_jsx_in_expr(&*init) {
                                                     let wrapped = Expr::Call(CallExpr {
                                                         span: Default::default(),
                                                         callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
-                                                            import_name.clone().into(),
+                                                            observer_name.clone().into(),
                                                             Default::default(),
                                                             Default::default(),
                                                         )))),
                                                         args: vec![ExprOrSpread {
                                                             spread: None,
-                                                            expr: arg.expr.clone(),
+                                                            expr: init.clone(),
                                                         }],
                                                         type_args: None,
                                                         ctxt: Default::default(),
                                                     });
-                                                    arg.expr = Box::new(wrapped);
-                                                },
-                                                _ => {}
-                                            }
+                                                    *init = Box::new(wrapped);
+                                                }
+                                            },
+                                            Expr::Fn(f_expr) => {
+                                                if contains_jsx_in_function(&f_expr.function) {
+                                                    let wrapped = Expr::Call(CallExpr {
+                                                        span: Default::default(),
+                                                        callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
+                                                            observer_name.clone().into(),
+                                                            Default::default(),
+                                                            Default::default(),
+                                                        )))),
+                                                        args: vec![ExprOrSpread {
+                                                            spread: None,
+                                                            expr: init.clone(),
+                                                        }],
+                                                        type_args: None,
+                                                        ctxt: Default::default(),
+                                                    });
+                                                    *init = Box::new(wrapped);
+                                                }
+                                            },
+                                            _ => {}
                                         }
-                                    }
-                                    // EXISTING: Handle arrow functions
-                                    match &mut **init {
-                                        Expr::Arrow(_) => {
-                                            if contains_jsx_in_expr(&*init) {
-                                                let wrapped = Expr::Call(CallExpr {
-                                                    span: Default::default(),
-                                                    callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
-                                                        import_name.clone().into(),
-                                                        Default::default(),
-                                                        Default::default(),
-                                                    )))),
-                                                    args: vec![ExprOrSpread {
-                                                        spread: None,
-                                                        expr: init.clone(),
-                                                    }],
-                                                    type_args: None,
-                                                    ctxt: Default::default(),
-                                                });
-                                                *init = Box::new(wrapped);
-                                            }
-                                        },
-                                        // EXISTING: Handle function expressions
-                                        Expr::Fn(f_expr) => {
-                                            if contains_jsx_in_function(&f_expr.function) {
-                                                let wrapped = Expr::Call(CallExpr {
-                                                    span: Default::default(),
-                                                    callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
-                                                        import_name.clone().into(),
-                                                        Default::default(),
-                                                        Default::default(),
-                                                    )))),
-                                                    args: vec![ExprOrSpread {
-                                                        spread: None,
-                                                        expr: init.clone(),
-                                                    }],
-                                                    type_args: None,
-                                                    ctxt: Default::default(),
-                                                });
-                                                *init = Box::new(wrapped);
-                                            }
-                                        },
-                                        _ => {}
                                     }
                                 }
                             }
                             ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export_decl))
                         },
-                        // ...existing code...
                         _ => ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export_decl))
                     }
                 },
-                // NEW: Transform default export declarations with functions containing JSX
                 ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(export_decl)) => {
                     if let swc_ecma_ast::DefaultDecl::Fn(ref f) = export_decl.decl {
                         if contains_jsx_in_function(&f.function) {
                             let wrapped_expr = Expr::Call(CallExpr {
                                 span: Default::default(),
                                 callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
-                                    import_name.clone().into(),
+                                    observer_name.clone().into(),
                                     Default::default(),
                                     Default::default(),
                                 )))),
