@@ -37,6 +37,7 @@ export const transform: PluginObj = {
       }
 
       let hasObserverImport = false;
+      let transformedJSX = false; // renamed flag
 
       path.traverse({
         ImportDeclaration(importPath) {
@@ -70,7 +71,13 @@ export const transform: PluginObj = {
             },
           });
           if (hasJsx) {
-            wrapFunctionWithObserver(functionPath, IMPORT_NAME);
+            const hasWrapped = wrapFunctionWithObserver(
+              functionPath,
+              IMPORT_NAME
+            );
+
+            transformedJSX = transformedJSX || hasWrapped;
+
             functionPath.skip();
           }
         },
@@ -82,7 +89,12 @@ export const transform: PluginObj = {
             },
           });
           if (hasJsx) {
-            wrapFunctionWithObserver(functionPath, IMPORT_NAME);
+            const hasWrapped = wrapFunctionWithObserver(
+              functionPath,
+              IMPORT_NAME
+            );
+            transformedJSX = transformedJSX || hasWrapped;
+
             functionPath.skip();
           }
         },
@@ -94,13 +106,20 @@ export const transform: PluginObj = {
             },
           });
           if (hasJsx) {
-            wrapFunctionWithObserver(functionPath, IMPORT_NAME);
+            const hasWrapped = wrapFunctionWithObserver(
+              functionPath,
+              IMPORT_NAME
+            );
+
+            transformedJSX = transformedJSX || hasWrapped;
+
             functionPath.skip();
           }
         },
       });
 
-      if (!hasObserverImport) {
+      // Only add import if functions with JSX were transformed
+      if (!hasObserverImport && transformedJSX) {
         const _importDeclaration = importDeclaration(
           [importSpecifier(identifier(IMPORT_NAME), identifier(IMPORT_NAME))],
           stringLiteral(IMPORT_PATH)
@@ -122,6 +141,27 @@ function wrapFunctionWithObserver(
   observerName: string
 ) {
   const funcNode = functionPath.node;
+  const parentNode = functionPath.parent;
+  const parentPath = functionPath.parentPath;
+
+  // Check if the function is already wrapped with observer
+  if (
+    isCallExpression(parentNode) &&
+    isIdentifier(parentNode.callee) &&
+    parentNode.callee.name === observerName
+  ) {
+    // If we're in a variable declaration, leave it as is
+    if (parentPath?.parent && isVariableDeclarator(parentPath.parent)) {
+      return false;
+    }
+    // Otherwise, wrap the entire observer call
+    const observerCall = callExpression(identifier(observerName), [parentNode]);
+    if (parentPath) {
+      parentPath.replaceWith(observerCall);
+      return true;
+    }
+    return false;
+  }
 
   if (isFunctionDeclaration(funcNode)) {
     // Convert FunctionDeclaration to VariableDeclaration wrapped with observer
@@ -140,7 +180,10 @@ function wrapFunctionWithObserver(
 
     if (isExportDefaultDeclaration(functionPath.parent)) {
       functionPath.replaceWith(observerCall);
-    } else if (id) {
+      return true;
+    }
+
+    if (id) {
       const _variableDeclarator = variableDeclarator(id, observerCall);
       const _variableDeclaration = variableDeclaration("const", [
         _variableDeclarator,
@@ -148,36 +191,32 @@ function wrapFunctionWithObserver(
 
       // Replace the function declaration with variable declaration
       functionPath.replaceWith(_variableDeclaration);
+
+      return true;
     }
   }
 
   // For VariableDeclarators (e.g., const Func = () => {})
-  else if (
+  if (
     isVariableDeclarator(funcNode) &&
     (isFunctionExpression(funcNode.init) ||
       isArrowFunctionExpression(funcNode.init))
   ) {
     const init = funcNode.init;
-
     const observerCall = callExpression(identifier(observerName), [init]);
-
     // @ts-ignore
     functionPath.get("init").replaceWith(observerCall);
+    return true;
   }
 
-  // For other cases
-  else if (
-    !isCallExpression(functionPath.parent) ||
+  // For other cases where it's not already wrapped
+  const observerCall = callExpression(identifier(observerName), [
     // @ts-ignore
-    functionPath.parent.callee.name !== observerName
-  ) {
-    const observerCall = callExpression(identifier(observerName), [
-      // @ts-ignore
-      funcNode,
-    ]);
+    funcNode,
+  ]);
 
-    functionPath.replaceWith(observerCall);
-  }
+  functionPath.replaceWith(observerCall);
+  return true;
 }
 
 export default function createPlugin(options: {
