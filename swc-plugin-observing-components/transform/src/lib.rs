@@ -81,7 +81,17 @@ fn contains_jsx_in_stmt(stmt: &Stmt) -> bool {
 
 fn contains_jsx_in_module(module: &Module) -> bool {
     module.body.iter().any(|item| match item {
-        ModuleItem::Stmt(stmt) => contains_jsx_in_stmt(stmt),
+        ModuleItem::Stmt(stmt) => match stmt {
+            // Add explicit check for variable declarations in module statements
+            Stmt::Decl(Decl::Var(var_decl)) => var_decl.decls.iter().any(|decl| {
+                if let Some(init) = &decl.init {
+                    contains_jsx_in_expr(init)
+                } else {
+                    false
+                }
+            }),
+            _ => contains_jsx_in_stmt(stmt),
+        },
         ModuleItem::ModuleDecl(decl) => match decl {
             ModuleDecl::ExportDefaultExpr(export) => contains_jsx_in_expr(&export.expr),
             ModuleDecl::ExportDecl(export_decl) => match &export_decl.decl {
@@ -449,6 +459,86 @@ impl Fold for ObserverTransform {
                     } else {
                         ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(export_decl))
                     }
+                },
+                // Add a new case to handle non-exported variable declarations
+                ModuleItem::Stmt(Stmt::Decl(Decl::Var(mut var_decl))) => {
+                    // Process each variable declarator
+                    for decl in var_decl.decls.iter_mut() {
+                        if let Some(init) = &mut decl.init {
+                            if is_already_wrapped(&*init, &observer_name) {
+                                continue;
+                            }
+                            let mut wrapped_already = false;
+                            if let Expr::Call(call_expr) = &**init {
+                                if let Some(arg) = call_expr.args.first() {
+                                    if matches!(&*arg.expr, Expr::Fn(_) | Expr::Arrow(_))
+                                        && contains_jsx_in_expr(&arg.expr)
+                                    {
+                                        let wrapped = Expr::Call(CallExpr {
+                                            span: Default::default(),
+                                            callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
+                                                observer_name.clone().into(),
+                                                Default::default(),
+                                                Default::default(),
+                                            )))),
+                                            args: vec![ExprOrSpread {
+                                                spread: None,
+                                                expr: init.clone(),
+                                            }],
+                                            type_args: None,
+                                            ctxt: Default::default(),
+                                        });
+                                        *init = Box::new(wrapped);
+                                        wrapped_already = true;
+                                    }
+                                }
+                            }
+                            if !wrapped_already {
+                                match &mut **init {
+                                    Expr::Arrow(_) => {
+                                        if contains_jsx_in_expr(&*init) {
+                                            let wrapped = Expr::Call(CallExpr {
+                                                span: Default::default(),
+                                                callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
+                                                    observer_name.clone().into(),
+                                                    Default::default(),
+                                                    Default::default(),
+                                                )))),
+                                                args: vec![ExprOrSpread {
+                                                    spread: None,
+                                                    expr: init.clone(),
+                                                }],
+                                                type_args: None,
+                                                ctxt: Default::default(),
+                                            });
+                                            *init = Box::new(wrapped);
+                                        }
+                                    },
+                                    Expr::Fn(f_expr) => {
+                                        if contains_jsx_in_function(&f_expr.function) {
+                                            let wrapped = Expr::Call(CallExpr {
+                                                span: Default::default(),
+                                                callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
+                                                    observer_name.clone().into(),
+                                                    Default::default(),
+                                                    Default::default(),
+                                                )))),
+                                                args: vec![ExprOrSpread {
+                                                    spread: None,
+                                                    expr: init.clone(),
+                                                }],
+                                                type_args: None,
+                                                ctxt: Default::default(),
+                                            });
+                                            *init = Box::new(wrapped);
+                                        }
+                                    },
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                    ModuleItem::Stmt(Stmt::Decl(Decl::Var(var_decl)))
                 },
                 item => item,
             }
