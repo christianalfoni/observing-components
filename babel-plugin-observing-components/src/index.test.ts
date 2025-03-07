@@ -88,5 +88,83 @@ const Counter6 = observer(function Counter6() {
 const Counter6 = foo(observer(() => {
   return <h1>Hello</h1>;
 }));`);
-  });  
+  });
+
+  test("Should not transform function with lowercase name even with jsx", () => {
+    expect(
+      runTransform(`const counter = () => {
+    return <h1>Hello</h1>
+}`)
+    ).toBe(`const counter = () => {
+  return <h1>Hello</h1>;
+};`);
+  });
+
+  test("Should transform function with uppercase name and jsx", () => {
+    expect(
+      runTransform(`const Counter = () => {
+    return <h1>Hello</h1>
+}`)
+    ).toBe(`import { observer } from "bonsify";
+const Counter = observer(() => {
+  return <h1>Hello</h1>;
+});`);
+  });
+
+  test("Should not transform standalone function with lowercase name and jsx", () => {
+    expect(
+      runTransform(`function counter() {
+    return <h1>Hello</h1>
+}`)
+    ).toBe(`function counter() {
+  return <h1>Hello</h1>;
+}`);
+  });
+
+  test("Should transform standalone function with uppercase name and jsx", () => {
+    expect(
+      runTransform(`function Counter() {
+    return <h1>Hello</h1>
+}`)
+    ).toBe(`import { observer } from "bonsify";
+const Counter = observer(function Counter() {
+  return <h1>Hello</h1>;
+});`);
+  });
+
+  test("Should transform components inside object literals", () => {
+    expect(
+      runTransform(`const components = {
+    Foo: () => <div />
+}`)
+    ).toBe(`import { observer } from "bonsify";
+const components = {
+  Foo: observer(() => <div />)
+};`);
+  });
+
+  test("Should transform components with computed property names", () => {
+    expect(
+      runTransform(`const Bar = "bar";
+const components = {
+    [Foo]: () => <div />,
+    [Bar]: () => <span />
+}`)
+    ).toBe(`import { observer } from "bonsify";
+const Bar = "bar";
+const components = {
+  [Foo]: observer(() => <div />),
+  [Bar]: () => <span />
+};`);
+  });
+
+  test("Should not transform lowercase properties inside object literals", () => {
+    expect(
+      runTransform(`const components = {
+    foo: () => <div />
+}`)
+    ).toBe(`const components = {
+  foo: () => <div />
+};`);
+  });
 });

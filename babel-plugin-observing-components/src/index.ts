@@ -19,7 +19,100 @@ import {
   variableDeclaration,
   isVariableDeclarator,
   isCallExpression,
+  isObjectProperty,
+  isObjectExpression,
+  ObjectProperty,
 } from "@babel/types";
+
+// Helper function to check if identifier starts with uppercase letter
+function startsWithUppercase(name: string): boolean {
+  return /^[A-Z]/.test(name);
+}
+
+// Helper function to check if a function is a component (has JSX and starts with uppercase)
+function isComponentFunction(path: NodePath<Node>): boolean {
+  // Check for JSX
+  let hasJsx = false;
+  path.traverse({
+    JSX() {
+      hasJsx = true;
+      // Stop traversing once we find JSX
+      path.stop();
+    },
+  });
+
+  if (!hasJsx) return false;
+
+  // Check if the identifier starts with uppercase
+  let functionName: string | null = null;
+
+  if (isFunctionDeclaration(path.node) && path.node.id) {
+    // Standalone function declaration
+    functionName = path.node.id.name;
+  } else {
+    // For function expressions, we need to look up further in the AST
+    let currentPath: NodePath = path;
+    let found = false;
+
+    // Look up through ancestors to find variable declarator, assignment, or object property
+    while (currentPath.parentPath && !found) {
+      currentPath = currentPath.parentPath;
+
+      // Direct variable declaration: const Component = () => {}
+      if (
+        isVariableDeclarator(currentPath.node) &&
+        isIdentifier(currentPath.node.id)
+      ) {
+        functionName = currentPath.node.id.name;
+        found = true;
+      }
+      // Skip object properties - we'll handle these separately
+      else if (isObjectProperty(currentPath.node)) {
+        // Don't process object properties here
+        return false;
+      }
+      // Handle function wrapped in another function: const Component = foo(() => {})
+      else if (isCallExpression(currentPath.node)) {
+        // Keep looking up
+        continue;
+      }
+      // If we reach a statement level without finding an identifier, stop looking
+      else if (currentPath.isStatement()) {
+        break;
+      }
+    }
+  }
+
+  return functionName !== null && startsWithUppercase(functionName);
+}
+
+// Helper function to check if property name starts with uppercase
+function isUppercaseProperty(prop: ObjectProperty): boolean {
+  // Regular property: { Foo: () => jsx }
+  if (!prop.computed && isIdentifier(prop.key)) {
+    return startsWithUppercase(prop.key.name);
+  }
+  // Computed property: { [Foo]: () => jsx }
+  else if (prop.computed && isIdentifier(prop.key)) {
+    return startsWithUppercase(prop.key.name);
+  }
+  return false;
+}
+
+// Helper function to check if a property value has JSX
+function propertyHasJSX(propertyPath: NodePath<ObjectProperty>): boolean {
+  let hasJsx = false;
+
+  propertyPath.get("value").traverse({
+    JSX() {
+      hasJsx = true;
+      // Stop traversing once we find JSX
+      propertyPath.stop();
+    },
+  });
+
+  return hasJsx;
+}
 
 export const transform: PluginObj = {
   name: "wrap-with-observer",
@@ -61,16 +154,45 @@ export const transform: PluginObj = {
         },
       });
 
-      // New: wrap any function returning JSX with observer
+      // Handle object properties with JSX functions
+      path.traverse({
+        ObjectProperty(propertyPath) {
+          const prop = propertyPath.node;
+
+          // Skip if not a function value
+          if (
+            !isFunctionExpression(prop.value) &&
+            !isArrowFunctionExpression(prop.value)
+          ) {
+            return;
+          }
+
+          // Check if property key starts with uppercase and has JSX
+          if (isUppercaseProperty(prop) && propertyHasJSX(propertyPath)) {
+            // Check if already wrapped with observer
+            if (
+              isCallExpression(prop.value) &&
+              // @ts-ignore
+              isIdentifier(prop.value.callee) &&
+              // @ts-ignore
+              prop.value.callee.name === IMPORT_NAME
+            ) {
+              return;
+            }
+
+            const observerCall = callExpression(identifier(IMPORT_NAME), [
+              prop.value,
+            ]);
+            propertyPath.get("value").replaceWith(observerCall);
+            transformedJSX = true;
+          }
+        },
+      });
+
+      // Wrap any function returning JSX with observer
       path.traverse({
         FunctionDeclaration(functionPath) {
-          let hasJsx = false;
-          functionPath.traverse({
-            JSX() {
-              hasJsx = true;
-            },
-          });
-          if (hasJsx) {
+          if (isComponentFunction(functionPath)) {
             const hasWrapped = wrapFunctionWithObserver(
               functionPath,
               IMPORT_NAME
@@ -82,13 +204,12 @@ export const transform: PluginObj = {
           }
         },
         FunctionExpression(functionPath) {
-          let hasJsx = false;
-          functionPath.traverse({
-            JSX() {
-              hasJsx = true;
-            },
-          });
-          if (hasJsx) {
+          // Skip if parent is ObjectProperty - we handle that separately
+          if (isObjectProperty(functionPath.parent)) {
+            return;
+          }
+
+          if (isComponentFunction(functionPath)) {
             const hasWrapped = wrapFunctionWithObserver(
               functionPath,
               IMPORT_NAME
@@ -99,13 +220,12 @@ export const transform: PluginObj = {
           }
         },
         ArrowFunctionExpression(functionPath) {
-          let hasJsx = false;
-          functionPath.traverse({
-            JSX() {
-              hasJsx = true;
-            },
-          });
-          if (hasJsx) {
+          // Skip if parent is ObjectProperty - we handle that separately
+          if (isObjectProperty(functionPath.parent)) {
+            return;
+          }
+
+          if (isComponentFunction(functionPath)) {
             const hasWrapped = wrapFunctionWithObserver(
               functionPath,
               IMPORT_NAME

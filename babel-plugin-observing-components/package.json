@@ -1,6 +1,6 @@
 {
   "name": "babel-plugin-observing-components",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Wrap components in a observers to make them reactive",
   "author": "Christian Alfoni <christianalfoni@gmail.com>",
   "license": "MIT",
