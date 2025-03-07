@@ -31,6 +31,15 @@ impl ObserverTransform {
     }
 }
 
+// NEW: Helper function to check if an identifier starts with an uppercase letter
+fn is_component_name(name: &str) -> bool {
+    if let Some(first_char) = name.chars().next() {
+        first_char.is_uppercase()
+    } else {
+        false
+    }
+}
+
 fn contains_jsx_in_expr(expr: &Expr) -> bool {
     match expr {
         Expr::JSXElement(_) | Expr::JSXFragment(_) => true,
@@ -45,8 +54,20 @@ fn contains_jsx_in_expr(expr: &Expr) -> bool {
                 false
             }
         },
-        // NEW: Check if Call expressions' arguments contain JSX
+        // Check if Call expressions' arguments contain JSX
         Expr::Call(call_expr) => call_expr.args.iter().any(|arg| contains_jsx_in_expr(&arg.expr)),
+        // NEW: Check object literals for JSX in property values
+        Expr::Object(obj) => obj.props.iter().any(|prop| {
+            if let PropOrSpread::Prop(prop_box) = prop {
+                if let Prop::KeyValue(key_value) = &**prop_box {
+                    contains_jsx_in_expr(&key_value.value)
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        }),
         _ => false
     }
 }
@@ -75,6 +96,13 @@ fn contains_jsx_in_stmt(stmt: &Stmt) -> bool {
         },
         Stmt::Expr(expr) => contains_jsx_in_expr(&expr.expr),
         Stmt::Block(block) => contains_jsx_in_block(block),
+        Stmt::Decl(Decl::Var(var_decl)) => var_decl.decls.iter().any(|decl| {
+            if let Some(init) = &decl.init {
+                contains_jsx_in_expr(init)
+            } else {
+                false
+            }
+        }),
         _ => false
     }
 }
@@ -241,7 +269,7 @@ impl Fold for ObserverTransform {
             match item {
                 // ...existing code...
                 ModuleItem::Stmt(Stmt::Decl(Decl::Fn(fn_decl))) => {
-                    if contains_jsx_in_function(&fn_decl.function) {
+                    if contains_jsx_in_function(&fn_decl.function) && is_component_name(&fn_decl.ident.sym.to_string()) {
                         let ident = fn_decl.ident.clone();
                         let fn_expr = Expr::Fn(FnExpr {
                             ident: Some(ident.clone()),
@@ -307,7 +335,7 @@ impl Fold for ObserverTransform {
                 ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(mut export_decl)) => {
                     match &mut export_decl.decl {
                         Decl::Fn(fn_decl) => {
-                            if contains_jsx_in_function(&fn_decl.function) {
+                            if contains_jsx_in_function(&fn_decl.function) && is_component_name(&fn_decl.ident.sym.to_string()) {
                                 let ident = fn_decl.ident.clone();
                                 let fn_expr = Expr::Fn(FnExpr {
                                     ident: Some(ident.clone()),
@@ -351,18 +379,27 @@ impl Fold for ObserverTransform {
                             }
                         },
                         Decl::Var(var_decl) => {
-                            // ...existing code for handling var declarations...
                             for decl in var_decl.decls.iter_mut() {
                                 if let Some(init) = &mut decl.init {
                                     if is_already_wrapped(&*init, &observer_name) {
                                         continue;
                                     }
-                                    let mut wrapped_already = false;
-                                    if let Expr::Call(call_expr) = &**init {
-                                        if let Some(arg) = call_expr.args.first() {
-                                            if matches!(&*arg.expr, Expr::Fn(_) | Expr::Arrow(_))
-                                                && contains_jsx_in_expr(&arg.expr)
-                                            {
+                                    
+                                    // Get variable name for component detection
+                                    let var_name = match &decl.name {
+                                        Pat::Ident(binding_ident) => Some(binding_ident.id.sym.to_string()),
+                                        _ => None
+                                    };
+                                    
+                                    // Check if variable name starts with uppercase (component name)
+                                    let is_component = var_name.as_ref()
+                                        .map(|name| is_component_name(name))
+                                        .unwrap_or(false);
+                                    
+                                    if is_component && contains_jsx_in_expr(&*init) {
+                                        // Handle both direct function expressions and wrapped functions
+                                        match &**init {
+                                            Expr::Arrow(_) | Expr::Fn(_) => {
                                                 let wrapped = Expr::Call(CallExpr {
                                                     span: Default::default(),
                                                     callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
@@ -378,33 +415,17 @@ impl Fold for ObserverTransform {
                                                     ctxt: Default::default(),
                                                 });
                                                 *init = Box::new(wrapped);
-                                                wrapped_already = true;
-                                            }
-                                        }
-                                    }
-                                    if !wrapped_already {
-                                        match &mut **init {
-                                            Expr::Arrow(_) => {
-                                                if contains_jsx_in_expr(&*init) {
-                                                    let wrapped = Expr::Call(CallExpr {
-                                                        span: Default::default(),
-                                                        callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
-                                                            observer_name.clone().into(),
-                                                            Default::default(),
-                                                            Default::default(),
-                                                        )))),
-                                                        args: vec![ExprOrSpread {
-                                                            spread: None,
-                                                            expr: init.clone(),
-                                                        }],
-                                                        type_args: None,
-                                                        ctxt: Default::default(),
-                                                    });
-                                                    *init = Box::new(wrapped);
-                                                }
                                             },
-                                            Expr::Fn(f_expr) => {
-                                                if contains_jsx_in_function(&f_expr.function) {
+                                            // Handle cases like const Home = someWrapper(() => <div />)
+                                            Expr::Call(call_expr) => {
+                                                let has_jsx_arg = call_expr.args.iter().any(|arg| {
+                                                    match &*arg.expr {
+                                                        Expr::Arrow(_) | Expr::Fn(_) => contains_jsx_in_expr(&arg.expr),
+                                                        _ => false
+                                                    }
+                                                });
+                                                
+                                                if has_jsx_arg {
                                                     let wrapped = Expr::Call(CallExpr {
                                                         span: Default::default(),
                                                         callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
@@ -423,6 +444,47 @@ impl Fold for ObserverTransform {
                                                 }
                                             },
                                             _ => {}
+                                        }
+                                    }
+                                    
+                                    // Handle object literals with potential component definitions
+                                    if let Expr::Object(obj) = &mut **init {
+                                        for prop in obj.props.iter_mut() {
+                                            if let PropOrSpread::Prop(prop_box) = prop {
+                                                if let Prop::KeyValue(key_value) = &mut **prop_box {
+                                                    // Check if property key has uppercase first letter
+                                                    let key_is_component = match &key_value.key {
+                                                        PropName::Ident(ident) => is_component_name(&ident.sym.to_string()),
+                                                        PropName::Str(str) => is_component_name(&str.value.to_string()),
+                                                        PropName::Computed(computed) => {
+                                                            if let Expr::Ident(ident) = &*computed.expr {
+                                                                is_component_name(&ident.sym.to_string())
+                                                            } else {
+                                                                false
+                                                            }
+                                                        },
+                                                        _ => false,
+                                                    };
+                                                    
+                                                    if key_is_component && contains_jsx_in_expr(&key_value.value) {
+                                                        let wrapped = Expr::Call(CallExpr {
+                                                            span: Default::default(),
+                                                            callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
+                                                                observer_name.clone().into(),
+                                                                Default::default(),
+                                                                Default::default(),
+                                                            )))),
+                                                            args: vec![ExprOrSpread {
+                                                                spread: None,
+                                                                expr: key_value.value.clone(),
+                                                            }],
+                                                            type_args: None,
+                                                            ctxt: Default::default(),
+                                                        });
+                                                        key_value.value = Box::new(wrapped);
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -460,20 +522,29 @@ impl Fold for ObserverTransform {
                         ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(export_decl))
                     }
                 },
-                // Add a new case to handle non-exported variable declarations
+                // Fix non-exported variable declarations
                 ModuleItem::Stmt(Stmt::Decl(Decl::Var(mut var_decl))) => {
-                    // Process each variable declarator
                     for decl in var_decl.decls.iter_mut() {
                         if let Some(init) = &mut decl.init {
                             if is_already_wrapped(&*init, &observer_name) {
                                 continue;
                             }
-                            let mut wrapped_already = false;
-                            if let Expr::Call(call_expr) = &**init {
-                                if let Some(arg) = call_expr.args.first() {
-                                    if matches!(&*arg.expr, Expr::Fn(_) | Expr::Arrow(_))
-                                        && contains_jsx_in_expr(&arg.expr)
-                                    {
+                            
+                            // Get variable name for component detection
+                            let var_name = match &decl.name {
+                                Pat::Ident(binding_ident) => Some(binding_ident.id.sym.to_string()),
+                                _ => None
+                            };
+                            
+                            // Check if variable name starts with uppercase (component name)
+                            let is_component = var_name.as_ref()
+                                .map(|name| is_component_name(name))
+                                .unwrap_or(false);
+                            
+                            if is_component && contains_jsx_in_expr(&*init) {
+                                // Handle both direct function expressions and wrapped functions
+                                match &**init {
+                                    Expr::Arrow(_) | Expr::Fn(_) => {
                                         let wrapped = Expr::Call(CallExpr {
                                             span: Default::default(),
                                             callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
@@ -489,33 +560,17 @@ impl Fold for ObserverTransform {
                                             ctxt: Default::default(),
                                         });
                                         *init = Box::new(wrapped);
-                                        wrapped_already = true;
-                                    }
-                                }
-                            }
-                            if !wrapped_already {
-                                match &mut **init {
-                                    Expr::Arrow(_) => {
-                                        if contains_jsx_in_expr(&*init) {
-                                            let wrapped = Expr::Call(CallExpr {
-                                                span: Default::default(),
-                                                callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
-                                                    observer_name.clone().into(),
-                                                    Default::default(),
-                                                    Default::default(),
-                                                )))),
-                                                args: vec![ExprOrSpread {
-                                                    spread: None,
-                                                    expr: init.clone(),
-                                                }],
-                                                type_args: None,
-                                                ctxt: Default::default(),
-                                            });
-                                            *init = Box::new(wrapped);
-                                        }
                                     },
-                                    Expr::Fn(f_expr) => {
-                                        if contains_jsx_in_function(&f_expr.function) {
+                                    // Handle cases like const Home = someWrapper(() => <div />)
+                                    Expr::Call(call_expr) => {
+                                        let has_jsx_arg = call_expr.args.iter().any(|arg| {
+                                            match &*arg.expr {
+                                                Expr::Arrow(_) | Expr::Fn(_) => contains_jsx_in_expr(&arg.expr),
+                                                _ => false
+                                            }
+                                        });
+                                        
+                                        if has_jsx_arg {
                                             let wrapped = Expr::Call(CallExpr {
                                                 span: Default::default(),
                                                 callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
@@ -534,6 +589,47 @@ impl Fold for ObserverTransform {
                                         }
                                     },
                                     _ => {}
+                                }
+                            }
+                            
+                            // Handle special case for components inside objects
+                            if let Expr::Object(obj) = &mut **init {
+                                for prop in obj.props.iter_mut() {
+                                    if let PropOrSpread::Prop(prop_box) = prop {
+                                        if let Prop::KeyValue(key_value) = &mut **prop_box {
+                                            // Check if property key has uppercase first letter
+                                            let key_is_component = match &key_value.key {
+                                                PropName::Ident(ident) => is_component_name(&ident.sym.to_string()),
+                                                PropName::Str(str) => is_component_name(&str.value.to_string()),
+                                                PropName::Computed(computed) => {
+                                                    if let Expr::Ident(ident) = &*computed.expr {
+                                                        is_component_name(&ident.sym.to_string())
+                                                    } else {
+                                                        false
+                                                    }
+                                                },
+                                                _ => false,
+                                            };
+                                            
+                                            if key_is_component && contains_jsx_in_expr(&key_value.value) {
+                                                let wrapped = Expr::Call(CallExpr {
+                                                    span: Default::default(),
+                                                    callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
+                                                        observer_name.clone().into(),
+                                                        Default::default(),
+                                                        Default::default(),
+                                                    )))),
+                                                    args: vec![ExprOrSpread {
+                                                        spread: None,
+                                                        expr: key_value.value.clone(),
+                                                    }],
+                                                    type_args: None,
+                                                    ctxt: Default::default(),
+                                                });
+                                                key_value.value = Box::new(wrapped);
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
