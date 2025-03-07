@@ -149,39 +149,13 @@ const Counter = observer(function Counter() {
 });`);
   });
 
-  test("Should transform components inside object literals", () => {
+  test("Should NOT transform components inside object literals", () => {
     expect(
       runTransform(`const components = {
     Foo: () => <div />
 }`)
-    ).toBe(`import { observer } from "bonsify";
-const components = {
-  Foo: observer(() => <div />)
-};`);
-  });
-
-  test("Should transform components with computed property names", () => {
-    expect(
-      runTransform(`const Bar = "bar";
-const components = {
-    [PageAction.List]: () => <div />,
-    [Bar]: () => <span />
-}`)
-    ).toBe(`import { observer } from "bonsify";
-const Bar = "bar";
-const components = {
-  [PageAction.List]: observer(() => <div />),
-  [Bar]: observer(() => <span />)
-};`);
-  });
-
-  test("Should not transform lowercase properties inside object literals", () => {
-    expect(
-      runTransform(`const components = {
-    foo: () => <div />
-}`)
     ).toBe(`const components = {
-  foo: () => <div />
+  Foo: () => <div />
 };`);
   });
 });

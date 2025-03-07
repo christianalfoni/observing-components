@@ -86,44 +86,6 @@ function isComponentFunction(path: NodePath<Node>): boolean {
   return functionName !== null && startsWithUppercase(functionName);
 }
 
-// Helper function to check if property name starts with uppercase
-function isUppercaseProperty(prop: ObjectProperty): boolean {
-  // Regular property: { Foo: () => jsx }
-  if (!prop.computed && isIdentifier(prop.key)) {
-    return startsWithUppercase(prop.key.name);
-  }
-  // Computed property with MemberExpression: { [PageAction.List]: () => jsx }
-  else if (prop.computed && isMemberExpression(prop.key)) {
-    const object = prop.key.object;
-    if (isIdentifier(object)) {
-      return startsWithUppercase(object.name);
-    }
-  }
-  // Computed property with Identifier: { [Foo]: () => jsx }
-  else if (prop.computed && isIdentifier(prop.key)) {
-    return startsWithUppercase(prop.key.name);
-  }
-  // For any other cases, just check the string representation if possible
-  else if (prop.key && prop.key.loc && prop.key.loc.identifierName) {
-    return startsWithUppercase(prop.key.loc.identifierName);
-  }
-  return false;
-}
-
-// Helper function to check if a property value has JSX
-function propertyHasJSX(propertyPath: NodePath<ObjectProperty>): boolean {
-  let hasJsx = false;
-
-  propertyPath.get("value").traverse({
-    JSX() {
-      hasJsx = true;
-      // Don't call propertyPath.stop() here
-    },
-  });
-
-  return hasJsx;
-}
-
 export const transform: PluginObj = {
   name: "wrap-with-observer",
   visitor: {
@@ -164,41 +126,6 @@ export const transform: PluginObj = {
         },
       });
 
-      // Handle object properties with JSX functions
-      path.traverse({
-        ObjectProperty(propertyPath) {
-          const prop = propertyPath.node;
-
-          // Skip if not a function value
-          if (
-            !isFunctionExpression(prop.value) &&
-            !isArrowFunctionExpression(prop.value)
-          ) {
-            return;
-          }
-
-          // Check if property key starts with uppercase and has JSX
-          if (isUppercaseProperty(prop) && propertyHasJSX(propertyPath)) {
-            // Check if already wrapped with observer
-            if (
-              isCallExpression(prop.value) &&
-              // @ts-ignore
-              isIdentifier(prop.value.callee) &&
-              // @ts-ignore
-              prop.value.callee.name === IMPORT_NAME
-            ) {
-              return;
-            }
-
-            const observerCall = callExpression(identifier(IMPORT_NAME), [
-              prop.value,
-            ]);
-            propertyPath.get("value").replaceWith(observerCall);
-            transformedJSX = true;
-          }
-        },
-      });
-
       // Wrap any function returning JSX with observer
       path.traverse({
         FunctionDeclaration(functionPath) {
@@ -214,7 +141,7 @@ export const transform: PluginObj = {
           }
         },
         FunctionExpression(functionPath) {
-          // Skip if parent is ObjectProperty - we handle that separately
+          // Skip if parent is ObjectProperty - we don't want to transform these
           if (isObjectProperty(functionPath.parent)) {
             return;
           }
@@ -230,7 +157,7 @@ export const transform: PluginObj = {
           }
         },
         ArrowFunctionExpression(functionPath) {
-          // Skip if parent is ObjectProperty - we handle that separately
+          // Skip if parent is ObjectProperty - we don't want to transform these
           if (isObjectProperty(functionPath.parent)) {
             return;
           }
