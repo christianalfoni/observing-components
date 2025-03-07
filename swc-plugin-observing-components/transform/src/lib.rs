@@ -40,23 +40,7 @@ fn is_component_name(name: &str) -> bool {
     }
 }
 
-// New helper function to get the component name from a computed property expression
-fn get_computed_property_name(expr: &Expr) -> Option<String> {
-    match expr {
-        // Simple identifier like [Foo]
-        Expr::Ident(ident) => Some(ident.sym.to_string()),
-        
-        // Member expression like [PageAction.List]
-        Expr::Member(member_expr) => {
-            // For member expressions, we need the object part (PageAction)
-            match &*member_expr.obj {
-                Expr::Ident(obj_ident) => Some(obj_ident.sym.to_string()),
-                _ => None
-            }
-        },
-        _ => None
-    }
-}
+// Removed get_computed_property_name helper function as it's no longer needed
 
 fn contains_jsx_in_expr(expr: &Expr) -> bool {
     match expr {
@@ -74,18 +58,7 @@ fn contains_jsx_in_expr(expr: &Expr) -> bool {
         },
         // Check if Call expressions' arguments contain JSX
         Expr::Call(call_expr) => call_expr.args.iter().any(|arg| contains_jsx_in_expr(&arg.expr)),
-        // NEW: Check object literals for JSX in property values
-        Expr::Object(obj) => obj.props.iter().any(|prop| {
-            if let PropOrSpread::Prop(prop_box) = prop {
-                if let Prop::KeyValue(key_value) = &**prop_box {
-                    contains_jsx_in_expr(&key_value.value)
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        }),
+        // Removed Object properties JSX checking
         _ => false
     }
 }
@@ -464,48 +437,6 @@ impl Fold for ObserverTransform {
                                             _ => {}
                                         }
                                     }
-                                    
-                                    // Handle object literals with potential component definitions
-                                    if let Expr::Object(obj) = &mut **init {
-                                        for prop in obj.props.iter_mut() {
-                                            if let PropOrSpread::Prop(prop_box) = prop {
-                                                if let Prop::KeyValue(key_value) = &mut **prop_box {
-                                                    // Check if property key has uppercase first letter
-                                                    let key_is_component = match &key_value.key {
-                                                        PropName::Ident(ident) => is_component_name(&ident.sym.to_string()),
-                                                        PropName::Str(str) => is_component_name(&str.value.to_string()),
-                                                        PropName::Computed(computed) => {
-                                                            // Extract component name from computed property
-                                                            if let Some(name) = get_computed_property_name(&computed.expr) {
-                                                                is_component_name(&name)
-                                                            } else {
-                                                                false
-                                                            }
-                                                        },
-                                                        _ => false,
-                                                    };
-                                                    
-                                                    if key_is_component && contains_jsx_in_expr(&key_value.value) {
-                                                        let wrapped = Expr::Call(CallExpr {
-                                                            span: Default::default(),
-                                                            callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
-                                                                observer_name.clone().into(),
-                                                                Default::default(),
-                                                                Default::default(),
-                                                            )))),
-                                                            args: vec![ExprOrSpread {
-                                                                spread: None,
-                                                                expr: key_value.value.clone(),
-                                                            }],
-                                                            type_args: None,
-                                                            ctxt: Default::default(),
-                                                        });
-                                                        key_value.value = Box::new(wrapped);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
                                 }
                             }
                             ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export_decl))
@@ -608,48 +539,6 @@ impl Fold for ObserverTransform {
                                         }
                                     },
                                     _ => {}
-                                }
-                            }
-                            
-                            // Handle special case for components inside objects
-                            if let Expr::Object(obj) = &mut **init {
-                                for prop in obj.props.iter_mut() {
-                                    if let PropOrSpread::Prop(prop_box) = prop {
-                                        if let Prop::KeyValue(key_value) = &mut **prop_box {
-                                            // Check if property key has uppercase first letter
-                                            let key_is_component = match &key_value.key {
-                                                PropName::Ident(ident) => is_component_name(&ident.sym.to_string()),
-                                                PropName::Str(str) => is_component_name(&str.value.to_string()),
-                                                PropName::Computed(computed) => {
-                                                    // Extract component name from computed property
-                                                    if let Some(name) = get_computed_property_name(&computed.expr) {
-                                                        is_component_name(&name)
-                                                    } else {
-                                                        false
-                                                    }
-                                                },
-                                                _ => false,
-                                            };
-                                            
-                                            if key_is_component && contains_jsx_in_expr(&key_value.value) {
-                                                let wrapped = Expr::Call(CallExpr {
-                                                    span: Default::default(),
-                                                    callee: Callee::Expr(Box::new(Expr::Ident(Ident::new(
-                                                        observer_name.clone().into(),
-                                                        Default::default(),
-                                                        Default::default(),
-                                                    )))),
-                                                    args: vec![ExprOrSpread {
-                                                        spread: None,
-                                                        expr: key_value.value.clone(),
-                                                    }],
-                                                    type_args: None,
-                                                    ctxt: Default::default(),
-                                                });
-                                                key_value.value = Box::new(wrapped);
-                                            }
-                                        }
-                                    }
                                 }
                             }
                         }
