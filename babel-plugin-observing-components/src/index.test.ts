@@ -121,6 +121,23 @@ const Counter = observer(() => {
 }`);
   });
 
+  test("Should transform other functions when ignoring a function that should not be transformed", () => {
+    expect(
+      runTransform(`function counter() {
+    return <h1>Hello</h1>
+}
+function Counter() {
+  return <h1>Hello</h1>
+}`)
+    ).toBe(`import { observer } from "bonsify";
+function counter() {
+  return <h1>Hello</h1>;
+}
+const Counter = observer(function Counter() {
+  return <h1>Hello</h1>;
+});`);
+  });
+
   test("Should transform standalone function with uppercase name and jsx", () => {
     expect(
       runTransform(`function Counter() {
@@ -154,7 +171,7 @@ const components = {
 const Bar = "bar";
 const components = {
   [Foo]: observer(() => <div />),
-  [Bar]: () => <span />
+  [Bar]: observer(() => <span />)
 };`);
   });
 

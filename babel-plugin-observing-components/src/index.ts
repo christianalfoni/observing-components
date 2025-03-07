@@ -36,8 +36,7 @@ function isComponentFunction(path: NodePath<Node>): boolean {
   path.traverse({
     JSX() {
       hasJsx = true;
-      // Stop traversing once we find JSX
-      path.stop();
+      // Don't call path.stop() here as it stops traversal for the entire parent path
     },
   });
 
@@ -106,8 +105,7 @@ function propertyHasJSX(propertyPath: NodePath<ObjectProperty>): boolean {
   propertyPath.get("value").traverse({
     JSX() {
       hasJsx = true;
-      // Stop traversing once we find JSX
-      propertyPath.stop();
+      // Don't call propertyPath.stop() here
     },
   });
 
