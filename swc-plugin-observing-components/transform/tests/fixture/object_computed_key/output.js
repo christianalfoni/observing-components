@@ -4,6 +4,7 @@ const bar = "bar";
 const components = {
     [FOO]: observer(()=><div/>),
     // This should NOT be transformed (lowercase computed key)
-    [bar]: ()=><div/>
+    [bar]: ()=><div/>,
+    [Page.Foo]: observer(()=><div/>)
 };
 export default components;

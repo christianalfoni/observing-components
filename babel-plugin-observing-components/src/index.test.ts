@@ -164,13 +164,13 @@ const components = {
     expect(
       runTransform(`const Bar = "bar";
 const components = {
-    [Foo]: () => <div />,
+    [PageAction.List]: () => <div />,
     [Bar]: () => <span />
 }`)
     ).toBe(`import { observer } from "bonsify";
 const Bar = "bar";
 const components = {
-  [Foo]: observer(() => <div />),
+  [PageAction.List]: observer(() => <div />),
   [Bar]: observer(() => <span />)
 };`);
   });

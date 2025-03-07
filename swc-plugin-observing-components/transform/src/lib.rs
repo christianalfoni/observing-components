@@ -31,12 +31,30 @@ impl ObserverTransform {
     }
 }
 
-// NEW: Helper function to check if an identifier starts with an uppercase letter
+// Updated function to check if property key has uppercase first letter
 fn is_component_name(name: &str) -> bool {
     if let Some(first_char) = name.chars().next() {
         first_char.is_uppercase()
     } else {
         false
+    }
+}
+
+// New helper function to get the component name from a computed property expression
+fn get_computed_property_name(expr: &Expr) -> Option<String> {
+    match expr {
+        // Simple identifier like [Foo]
+        Expr::Ident(ident) => Some(ident.sym.to_string()),
+        
+        // Member expression like [PageAction.List]
+        Expr::Member(member_expr) => {
+            // For member expressions, we need the object part (PageAction)
+            match &*member_expr.obj {
+                Expr::Ident(obj_ident) => Some(obj_ident.sym.to_string()),
+                _ => None
+            }
+        },
+        _ => None
     }
 }
 
@@ -457,8 +475,9 @@ impl Fold for ObserverTransform {
                                                         PropName::Ident(ident) => is_component_name(&ident.sym.to_string()),
                                                         PropName::Str(str) => is_component_name(&str.value.to_string()),
                                                         PropName::Computed(computed) => {
-                                                            if let Expr::Ident(ident) = &*computed.expr {
-                                                                is_component_name(&ident.sym.to_string())
+                                                            // Extract component name from computed property
+                                                            if let Some(name) = get_computed_property_name(&computed.expr) {
+                                                                is_component_name(&name)
                                                             } else {
                                                                 false
                                                             }
@@ -602,8 +621,9 @@ impl Fold for ObserverTransform {
                                                 PropName::Ident(ident) => is_component_name(&ident.sym.to_string()),
                                                 PropName::Str(str) => is_component_name(&str.value.to_string()),
                                                 PropName::Computed(computed) => {
-                                                    if let Expr::Ident(ident) = &*computed.expr {
-                                                        is_component_name(&ident.sym.to_string())
+                                                    // Extract component name from computed property
+                                                    if let Some(name) = get_computed_property_name(&computed.expr) {
+                                                        is_component_name(&name)
                                                     } else {
                                                         false
                                                     }

@@ -22,6 +22,7 @@ import {
   isObjectProperty,
   isObjectExpression,
   ObjectProperty,
+  isMemberExpression,
 } from "@babel/types";
 
 // Helper function to check if identifier starts with uppercase letter
@@ -91,9 +92,20 @@ function isUppercaseProperty(prop: ObjectProperty): boolean {
   if (!prop.computed && isIdentifier(prop.key)) {
     return startsWithUppercase(prop.key.name);
   }
-  // Computed property: { [Foo]: () => jsx }
+  // Computed property with MemberExpression: { [PageAction.List]: () => jsx }
+  else if (prop.computed && isMemberExpression(prop.key)) {
+    const object = prop.key.object;
+    if (isIdentifier(object)) {
+      return startsWithUppercase(object.name);
+    }
+  }
+  // Computed property with Identifier: { [Foo]: () => jsx }
   else if (prop.computed && isIdentifier(prop.key)) {
     return startsWithUppercase(prop.key.name);
+  }
+  // For any other cases, just check the string representation if possible
+  else if (prop.key && prop.key.loc && prop.key.loc.identifierName) {
+    return startsWithUppercase(prop.key.loc.identifierName);
   }
   return false;
 }
