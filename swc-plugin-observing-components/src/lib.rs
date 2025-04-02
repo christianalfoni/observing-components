@@ -15,11 +15,26 @@ fn swc_plugin(program: Program, data: TransformPluginProgramMetadata) -> Program
     .expect("invalid plugin config")
     .unwrap();
 
-    // Get the filename from metadata and check if we should process it
-    let should_process = data
+    // Get the filename from metadata
+    let filename = data
         .get_context(&TransformPluginMetadataContextKind::Filename)
-        .map(|filename| !filename.contains("node_modules"))
-        .unwrap_or(true);
+        .unwrap_or_default();
+    
+    // Check exclusion patterns
+    let is_excluded = wrap_components_with_observer::should_exclude(&filename, &config.exclude);
+    
+    // Add debug output for path matching
+    #[cfg(debug_assertions)]
+    {
+        eprintln!("File: {}", filename);
+        eprintln!("Exclude patterns: {:?}", config.exclude);
+        eprintln!("Is excluded: {}", is_excluded);
+    }
+    
+    // Check if we should process this file:
+    // 1. Skip node_modules
+    // 2. Check against exclude patterns
+    let should_process = !filename.contains("node_modules") && !is_excluded;
 
     if !should_process {
         return program;

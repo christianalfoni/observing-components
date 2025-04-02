@@ -27,7 +27,8 @@ fn fixture(input: PathBuf) {
                 wrap_components_with_observer::observer_transform(
                     wrap_components_with_observer::Config {
                         import_path: "bonsify".into(),
-                        import_name: None
+                        import_name: None,
+                        exclude: vec!["node_modules".into()],
                     }
                 ),
             )

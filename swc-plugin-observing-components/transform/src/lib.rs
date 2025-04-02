@@ -1,12 +1,114 @@
 use swc_ecma_ast::*;
 use swc_ecma_visit::{fold_pass, noop_fold_type, Fold};
 use serde::Deserialize;
+use globset::{Glob, GlobSet, GlobSetBuilder};
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     #[serde(default)]
     pub import_name: Option<String>,
     pub import_path: String,
+    #[serde(default)]
+    pub exclude: Vec<String>,
+}
+
+// Helper function to check if a path should be excluded
+pub fn should_exclude(file_path: &str, exclude_patterns: &[String]) -> bool {
+    if exclude_patterns.is_empty() {
+        return false;
+    }
+
+    let path = Path::new(file_path);
+    
+    // Create PathBuf from the full path
+    let path_buf = PathBuf::from(file_path);
+    
+    // Get just the file name for simpler matching
+    let file_name = path.file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("");
+    
+    // Get the components of the path for more precise matching
+    let path_components: Vec<&str> = file_path.split(std::path::MAIN_SEPARATOR).collect();
+    
+    let mut builder = GlobSetBuilder::new();
+    
+    for pattern in exclude_patterns {
+        // Create a glob for each pattern and add to the set
+        match Glob::new(pattern) {
+            Ok(glob) => { builder.add(glob); },
+            Err(_) => { 
+                eprintln!("Invalid glob pattern: {}", pattern);
+                continue;
+            }
+        }
+    }
+
+    match builder.build() {
+        Ok(globset) => {
+            // Try to match against the full absolute path
+            if globset.is_match(file_path) {
+                return true;
+            }
+            
+            // Try to match against just the file name
+            if globset.is_match(file_name) {
+                return true;
+            }
+            
+            // Check if any pattern matches the path components
+            // This helps with relative path patterns like "src/Test.tsx"
+            for pattern in exclude_patterns {
+                let pattern_components: Vec<&str> = pattern.split('/').collect();
+                
+                // Try to find the pattern components as a subsequence in the path
+                if path_components_match(&path_components, &pattern_components) {
+                    return true;
+                }
+            }
+            
+            // Also try to match against path relative from project root
+            // This handles cases where exclude pattern is like "src/Test.tsx"
+            for i in 0..path_components.len() {
+                let potential_project_root = path_components[0..i].join(&std::path::MAIN_SEPARATOR.to_string());
+                let potential_relative_path = path_components[i..].join(&std::path::MAIN_SEPARATOR.to_string());
+                
+                if globset.is_match(&potential_relative_path) {
+                    return true;
+                }
+            }
+            
+            false
+        },
+        Err(_) => {
+            eprintln!("Failed to build globset from patterns");
+            false
+        }
+    }
+}
+
+// Helper function to check if pattern components appear as a subsequence in path components
+fn path_components_match(path_components: &[&str], pattern_components: &[&str]) -> bool {
+    if pattern_components.is_empty() {
+        return true;
+    }
+    
+    // Look for the pattern components in sequence within the path components
+    let mut path_idx = 0;
+    let mut pattern_idx = 0;
+    
+    while path_idx < path_components.len() && pattern_idx < pattern_components.len() {
+        if path_components[path_idx].to_lowercase() == pattern_components[pattern_idx].to_lowercase() {
+            pattern_idx += 1;
+            if pattern_idx == pattern_components.len() {
+                return true;
+            }
+        }
+        path_idx += 1;
+    }
+    
+    false
 }
 
 fn default_import_name() -> String {
