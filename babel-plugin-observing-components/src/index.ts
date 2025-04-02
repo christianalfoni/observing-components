@@ -1,5 +1,6 @@
 import { PluginObj } from "@babel/core";
 import { NodePath } from "@babel/traverse";
+import { minimatch } from "minimatch";
 // Explicit imports to avoid tslib dependency
 import {
   isIdentifier,
@@ -20,9 +21,6 @@ import {
   isVariableDeclarator,
   isCallExpression,
   isObjectProperty,
-  isObjectExpression,
-  ObjectProperty,
-  isMemberExpression,
 } from "@babel/types";
 
 // Helper function to check if identifier starts with uppercase letter
@@ -96,8 +94,10 @@ export const transform: PluginObj = {
       const IMPORT_PATH = state.opts.importPath as string;
       // @ts-ignore
       const IMPORT_NAME: string = state.opts.importName as string;
+      // @ts-ignore
+      const EXCLUDE_PATTERNS = state.opts.exclude as string[] | undefined;
 
-      if (filename && !shouldProcessFile(filename)) {
+      if (filename && !shouldProcessFile(filename, EXCLUDE_PATTERNS)) {
         return;
       }
 
@@ -187,9 +187,22 @@ export const transform: PluginObj = {
   },
 };
 
-function shouldProcessFile(filename: string) {
+function shouldProcessFile(filename: string, excludePatterns?: string[]) {
   const isNodeModule = filename.includes("node_modules");
   const isProjectFile = filename.startsWith(process.cwd());
+  
+  // Skip files that match any exclude pattern
+  if (excludePatterns && excludePatterns.length > 0) {
+    // Convert absolute path to relative path for matching
+    const relativePath = filename.substring(process.cwd().length + 1);
+    
+    for (const pattern of excludePatterns) {
+      if (minimatch(relativePath, pattern)) {
+        return false;
+      }
+    }
+  }
+  
   return !isNodeModule && isProjectFile;
 }
 
@@ -279,12 +292,14 @@ function wrapFunctionWithObserver(
 export default function createPlugin(options: {
   importPath: string;
   importName?: string;
+  exclude?: string[];
 }): [typeof transform, Record<string, any>] {
   return [
     transform,
     {
       importPath: options.importPath,
       importName: options.importName || "observer",
+      exclude: options.exclude || [],
     },
   ];
 }
