@@ -1,4 +1,4 @@
-# observing components
+# awesome
 
 Babel and SWC plugin to make components observers
 
