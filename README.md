@@ -1,4 +1,5 @@
-# observing components
+# 🔄 Observing Components
+### Zero-boilerplate reactive React components with automatic state observation
 
 Babel and SWC plugin to make components observers
 
