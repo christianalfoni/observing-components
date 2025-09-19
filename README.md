@@ -1,4 +1,6 @@
-# observing components
+# 🔍 Observing Components
+
+**Automatically transform React components into reactive observers**
 
 Babel and SWC plugin to make components observers
 
