@@ -1,6 +1,7 @@
-# observing components
+# 👁️ Observing Components
+### 🚀 Automatically transform React components into reactive observers with zero boilerplate
 
-Babel and SWC plugin to make components observers
+*Babel and SWC plugins that supercharge your React apps with seamless reactive state management*
 
 ## Motivation
 
