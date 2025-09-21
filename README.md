@@ -1,4 +1,4 @@
-# observing components
+# 🚀 Observing Components - Effortless React Performance with Reactive State
 
 Babel and SWC plugin to make components observers
 
