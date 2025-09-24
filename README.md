@@ -1,4 +1,5 @@
-# observing components
+# 🔍 Observing Components
+### *Effortless Reactive Performance for React* ⚡
 
 Babel and SWC plugin to make components observers
 
