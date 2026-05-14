@@ -1,7 +1,7 @@
 use swc_ecma_ast::*;
 use swc_ecma_visit::{fold_pass, noop_fold_type, Fold};
 use serde::Deserialize;
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::{Glob, GlobSetBuilder};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize, Clone)]
@@ -22,7 +22,7 @@ pub fn should_exclude(file_path: &str, exclude_patterns: &[String]) -> bool {
     let path = Path::new(file_path);
     
     // Create PathBuf from the full path
-    let path_buf = PathBuf::from(file_path);
+    let _path_buf = PathBuf::from(file_path);
     
     // Get just the file name for simpler matching
     let file_name = path.file_name()
@@ -71,7 +71,7 @@ pub fn should_exclude(file_path: &str, exclude_patterns: &[String]) -> bool {
             // Also try to match against path relative from project root
             // This handles cases where exclude pattern is like "src/Test.tsx"
             for i in 0..path_components.len() {
-                let potential_project_root = path_components[0..i].join(&std::path::MAIN_SEPARATOR.to_string());
+                let _potential_project_root = path_components[0..i].join(&std::path::MAIN_SEPARATOR.to_string());
                 let potential_relative_path = path_components[i..].join(&std::path::MAIN_SEPARATOR.to_string());
                 
                 if globset.is_match(&potential_relative_path) {
@@ -315,7 +315,7 @@ impl Fold for ObserverTransform {
                             let imported = if let Some(imported) = &named.imported {
                                 match imported {
                                     ModuleExportName::Ident(ident) => ident.sym.to_string(),
-                                    ModuleExportName::Str(s) => s.value.to_string(),
+                                    ModuleExportName::Str(s) => s.value.as_str().unwrap_or("").to_string(),
                                 }
                             } else {
                                 named.local.sym.to_string()
