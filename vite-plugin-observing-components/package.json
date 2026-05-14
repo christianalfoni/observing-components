@@ -1,0 +1,54 @@
+{
+  "name": "vite-plugin-observing-components",
+  "version": "0.1.0",
+  "description": "Vite plugin that wraps React components with observer — works with any Vite version and any underlying transformer (SWC or Babel)",
+  "author": "Christian Alfoni <christianalfoni@gmail.com>",
+  "license": "MIT",
+  "type": "module",
+  "repository": "git+https://github.com/christianalfoni/observing-components.git",
+  "module": "./dist/esm/index.js",
+  "main": "./dist/esm/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.js",
+      "types": "./dist/esm/index.d.ts",
+      "require": "./dist/cjs/index.cjs"
+    }
+  },
+  "types": "./dist/esm/index.d.ts",
+  "scripts": {
+    "dev": "tsc -p ./tsconfig.build-esm.json --watch",
+    "build": "yarn clean && yarn build:cjs && yarn build:esm",
+    "build:cjs": "tsc -p ./tsconfig.build-cjs.json && node renameToCjs.js",
+    "build:esm": "tsc -p ./tsconfig.build-esm.json",
+    "clean": "rimraf ./dist",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "yarn build",
+    "test": "vitest"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "vite",
+    "vite-plugin",
+    "react",
+    "observer",
+    "reactive",
+    "mobx"
+  ],
+  "peerDependencies": {
+    "vite": ">=3.0.0"
+  },
+  "dependencies": {
+    "babel-plugin-observing-components": "^0.2.0",
+    "@babel/core": "^7.26.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.17",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.6.2",
+    "vite": "^6.0.0",
+    "vitest": "^3.0.5"
+  }
+}

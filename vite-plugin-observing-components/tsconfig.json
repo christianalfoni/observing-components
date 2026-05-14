@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "moduleResolution": "node",
+    "skipLibCheck": true,
+    "importHelpers": false,
+    "pretty": true,
+    "sourceMap": true,
+    "inlineSources": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "strict": true,
+    "module": "ESNext",
+    "isolatedModules": true
+  },
+  "exclude": ["node_modules", "dist"]
+}
